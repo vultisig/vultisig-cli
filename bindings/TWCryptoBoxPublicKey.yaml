@@ -1,0 +1,50 @@
+class: TWCryptoBoxPublicKey
+static_functions:
+- name: IsValid
+  rust_name: tw_crypto_box_public_key_is_valid
+  args:
+  - name: data
+    ty: Nonnull < TWData >
+  return_type: bool
+  docs:
+  - Determines if the given public key is valid or not.
+  - ''
+  - \param data *non-null* byte array.
+  - \return true if the public key is valid, false otherwise.
+constructors:
+- name: CreateWithData
+  rust_name: tw_crypto_box_public_key_create_with_data
+  args:
+  - name: data
+    ty: Nonnull < TWData >
+  return_type: NullableMut < TWCryptoBoxPublicKey >
+  docs:
+  - Create a `crypto_box` public key with the given block of data.
+  - ''
+  - \param data *non-null* byte array. Expected to have 32 bytes.
+  - \note Should be deleted with \tw_crypto_box_public_key_delete.
+  - \return Nullable pointer to Public Key.
+destructor:
+  name: Delete
+  rust_name: tw_crypto_box_public_key_delete
+  args:
+  - name: public_key
+    ty: NonnullMut < TWCryptoBoxPublicKey >
+  return_type: void
+  docs:
+  - Delete the given public key.
+  - ''
+  - \param public_key *non-null* pointer to public key.
+methods: null
+properties:
+- name: Data
+  rust_name: tw_crypto_box_public_key_data
+  args:
+  - name: public_key
+    ty: Nonnull < TWCryptoBoxPublicKey >
+  return_type: NonnullMut < TWData >
+  docs:
+  - Returns the raw data of a given public-key.
+  - ''
+  - \param public_key *non-null* pointer to a public key.
+  - \return C-compatible result with a C-compatible byte array.

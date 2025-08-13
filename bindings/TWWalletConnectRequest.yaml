@@ -1,0 +1,20 @@
+class: TWWalletConnectRequest
+static_functions:
+- name: Parse
+  rust_name: tw_wallet_connect_request_parse
+  args:
+  - name: coin
+    ty: TWFFICoinType
+  - name: input
+    ty: Nonnull < TWData >
+  return_type: NonnullMut < TWData >
+  docs:
+  - Parses the WalletConnect signing request as a `SigningInput`.
+  - ''
+  - \param coin The given coin type to plan the transaction for.
+  - \param input The serialized data of a `WalletConnect::Proto::ParseRequestInput` proto object.
+  - \return The serialized data of `WalletConnect::Proto::ParseRequestOutput` proto object.
+constructors: null
+destructor: null
+methods: null
+properties: null

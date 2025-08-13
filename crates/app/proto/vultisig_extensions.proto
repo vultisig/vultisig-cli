@@ -1,0 +1,63 @@
+syntax = "proto3";
+
+package vultisig.extensions.v1;
+
+option go_package = "github.com/vultisig/commondata/go/vultisig/extensions/v1;v1";
+
+// Identifies a concrete MPC key (one per "account")
+message VaultKeyRef {
+  string vault_id        = 1;   // stable UUID for this MPC key
+  string network         = 2;   // "ETH" | "BTC" | "SOL"
+  string derivation_path = 3;   // label e.g. "m/44'/60'/0'/0/0" (UI/interop only)
+  string label           = 4;   // human alias e.g. "Main", "Trading"
+}
+
+// Request an address for a given MPC key
+message GetAddressRequest {
+  VaultKeyRef key        = 1;
+}
+
+// Address + pubkey response
+message GetAddressResponse {
+  VaultKeyRef key        = 1;
+  bytes  pubkey_bytes    = 2;   // secp256k1 (compressed 33) or ed25519 (32)
+  string pubkey_format   = 3;   // "secp256k1_compressed" | "ed25519"
+  string address         = 4;   // 0x.. | bc1.. | base58
+  string address_format  = 5;   // "eip55" | "bech32" | "bech32m" | "base58"
+}
+
+// Signing session (extend existing if present)
+message SigningRequest {
+  string session_id      = 1;
+  VaultKeyRef key        = 2;
+  string message_type    = 3;   // "eth_tx" | "eth_typed" | "btc_psbt" | "sol_tx"
+  bytes  payload         = 4;   // canonical bytes (or chunking msgs if large)
+  bytes  payload_hash    = 5;   // keccak/sha256 for integrity (per type)
+  int64  expires_at      = 6;   // epoch ms
+}
+
+message SigningResult {
+  string session_id      = 1;
+  string status          = 2;   // "OK" | "DENIED" | "ERROR"
+  bytes  signature       = 3;   // chain-specific signature (raw)
+  string raw_tx_hex      = 4;   // optional (ETH/BTC final)
+  string signed_psbt_b64 = 5;   // optional (BTC)
+  string tx_hash         = 6;   // if broadcast by mobile
+  string error           = 7;   // details if status != OK
+}
+
+// Per-chain defaults
+message ChainProfile {
+  string network          = 1;  // "ETH" | "BTC" | "SOL"
+  string default_path     = 2;  // e.g., "m/44'/60'/0'/0/0"
+  string address_format   = 3;  // "eip55" | "bech32" | ...
+  string script_type      = 4;  // BTC: "p2wpkh" | "p2tr"
+  string hrp              = 5;  // BTC: "bc"|"tb"
+}
+
+message ChainProfiles {
+  repeated ChainProfile profiles = 1;
+}
+
+
+

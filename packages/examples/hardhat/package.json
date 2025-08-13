@@ -1,0 +1,22 @@
+{
+  "name": "dkls-hardhat-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "deploy": "node --loader ts-node/esm scripts/deploy.ts"
+  },
+  "dependencies": {
+    "ethers": "^6.13.2",
+    "hardhat": "^2.22.6",
+    "vultisig-eth-signer": "file:../../packages/vultisig-eth-signer",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.12",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.4"
+  }
+}
+
+

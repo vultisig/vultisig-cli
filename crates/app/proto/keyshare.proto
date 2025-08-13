@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+package keyshare;
+
+// VaultKeyshare represents the complete .vult keyshare file format
+message VaultKeyshare {
+    uint32 version = 1;
+    KeyshareData keyshare_data = 2;
+}
+
+// KeyshareData contains the actual keyshare information
+message KeyshareData {
+    EcdsaKeyshare ecdsa = 1;
+    EddsaKeyshare eddsa = 2;
+    string vault_name = 3;
+    uint64 created_at = 4;
+}
+
+// ECDSA keyshare for secp256k1 (ETH/BTC)
+message EcdsaKeyshare {
+    bytes public_key = 1;        // Compressed public key (33 bytes)
+    bytes chain_code = 2;        // Chain code for HD derivation (32 bytes)
+    bytes private_share = 3;     // Private key share data
+    uint32 party_id = 4;         // Party identifier in MPC
+    uint32 threshold = 5;        // Threshold for signatures
+    uint32 total_parties = 6;    // Total number of parties
+}
+
+// EdDSA keyshare for Ed25519 (SOL)
+message EddsaKeyshare {
+    bytes public_key = 1;        // Ed25519 public key (32 bytes)
+    bytes chain_code = 2;        // Chain code for HD derivation (32 bytes)
+    bytes private_share = 3;     // Private key share data
+    uint32 party_id = 4;         // Party identifier in MPC
+    uint32 threshold = 5;        // Threshold for signatures
+    uint32 total_parties = 6;    // Total number of parties
+}

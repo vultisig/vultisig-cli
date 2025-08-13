@@ -1,0 +1,23 @@
+[package]
+name = "vultisig-wallet-core"
+version = "0.1.0"
+edition = "2021"
+description = "TrustWallet wallet-core integration for Vultisig"
+license = "MIT"
+
+[dependencies]
+anyhow = "1.0"
+hex = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+
+[build-dependencies]
+cmake = "0.1"
+bindgen = "0.69"
+
+[features]
+default = ["wallet-core-ffi"]
+wallet-core-ffi = []  # Enable actual wallet-core FFI bindings
+
+[lib]
+name = "vultisig_wallet_core"
+crate-type = ["staticlib", "rlib"]

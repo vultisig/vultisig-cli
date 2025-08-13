@@ -1,0 +1,23 @@
+{
+  "name": "vultisig-sol-signer",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rm -rf dist",
+    "prepare": "npm run build"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.95.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.12",
+    "typescript": "^5.5.4"
+  }
+}
+
+
+

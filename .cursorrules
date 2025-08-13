@@ -1,0 +1,179 @@
+# Vultisig CLI Cursor Rules
+
+## Project Overview
+This is a Rust-based MPC (Multi-Party Computation) signing CLI for multi-blockchain wallets that integrates with TrustWallet's wallet-core library and advanced MPC signing engines. The project enables secure 2-of-2 threshold signatures with mobile app co-signing support across 17+ blockchain networks.
+
+## Architecture & Structure
+
+### Core Components
+- **Rust CLI Binary (`vultisig`)**: Main command-line interface and daemon in `crates/app/`
+- **TypeScript Packages**: Integration libraries in `packages/` for web applications
+- **Third-party Dependencies**: External libraries in `third_party/` (wallet-core, MPC engines)
+- **Examples**: Integration patterns and testing workflows in `examples/`
+
+### Key Directories
+```
+vultisig-cli/
+├── crates/app/           # Main Rust application (builds to 'vultisig' binary)
+├── packages/             # TypeScript integration packages
+├── third_party/          # External dependencies (dkls23, wallet-core, etc.)
+├── examples/             # Integration examples and patterns
+├── keyshares/            # .vult keyshare files
+└── scripts/              # Utility and build scripts
+```
+
+## Development Rules
+
+### Binary and CLI Conventions
+- Main binary is named `vultisig` (not `vultisigd`)
+- Use "vultisig run" to start the daemon with logs
+- Use "vultisig" as the main CLI binary for all developer commands
+- Always use absolute paths for keyshare files to avoid resolution issues
+- Support both interactive and non-interactive password handling
+
+### Standardized CLI Commands
+- `vultisig run` - Start the MPC signing daemon
+- `vultisig address` - Show wallet addresses (not `addr`)
+- `vultisig sign` - Sign transactions (not `signtx`)
+- `vultisig list` - List keyshare files (not `list-keyshares`)
+- `vultisig status` - Check daemon status
+- `vultisig init` - Initialize directories
+- Function names follow pattern: `handle_<command>()` (e.g., `handle_sign`, `handle_address`)
+
+### Rust Development
+- Use workspace dependencies defined in root `Cargo.toml`
+- Follow the established async/tokio patterns throughout
+- Use `anyhow` for error handling and `tracing` for logging
+- Maintain feature flags: `default = ["wallet-core"]`, `dev-mode` for development
+- Use `clap` for CLI argument parsing with derive macros
+
+### Third-party Dependencies
+- Place external dependencies in the `third_party/` folder
+- Always wrap third-party APIs in the project's own modules
+- Use git submodules for external repositories
+- Build wallet-core separately using `scripts/build-wallet-core.sh`
+
+### TypeScript Integration
+- All TypeScript packages follow consistent structure:
+  - `package.json` with `"type": "module"`
+  - `tsconfig.json` with NodeNext module resolution
+  - `src/index.ts` as main entry point
+  - `dist/` for compiled output
+- Use Unix sockets (`/tmp/vultisig.sock`) for daemon communication
+- Implement JSON-RPC protocol for client-daemon communication
+- Support both WebSocket and HTTP protocols for different use cases
+
+### Testing and Quality
+- Use `cargo nextest` for test execution when available
+- Include integration tests in `tests/` directory
+- Support code coverage with `cargo-tarpaulin`
+- Run `cargo fmt` and `cargo clippy` for code quality
+- Use `build.sh` for full builds and `test.sh` for comprehensive testing
+
+### Network and Protocol Support
+- Support 17+ blockchain networks (Bitcoin, Ethereum, Solana, etc.)
+- Use appropriate cryptographic curves: secp256k1 for ECDSA, ed25519 for EdDSA
+- Implement proper BIP32 derivation paths for each network
+- Support both local and relay signing modes
+
+### Configuration and Setup
+- Use YAML configuration files (`vultisig-config.yaml`)
+- Default ports: WebSocket (8787), HTTP relay (18080)
+- Store keyshares in `./keyshares/` directory with `.vult` extension
+- Support both encrypted and unencrypted keyshares
+
+## Code Patterns
+
+### Error Handling
+```rust
+use anyhow::{anyhow, Context, Result};
+
+// Use Context for meaningful error messages
+keyshare.load_from_file(&path, password)
+    .with_context(|| format!("Failed to load keyshare from {}", path))?
+```
+
+### Logging
+```rust
+use tracing::{info, error, warn};
+
+info!("Starting Vultisig daemon...");
+error!("Failed to bind socket: {}", e);
+```
+
+### Async Patterns
+```rust
+// Use Arc for shared state across async tasks
+let session_manager = Arc::new(SessionManager::new());
+let coordinator = Arc::new(MpcCoordinator::new(session_manager.clone()));
+
+// Spawn tasks for concurrent services
+tokio::spawn(async move {
+    if let Err(e) = websocket::start_server(port, manager).await {
+        error!("WebSocket server error: {}", e);
+    }
+});
+```
+
+### CLI Structure
+```rust
+#[derive(Parser)]
+#[command(about = "Vultisig - Local MPC signing for multi-blockchain wallets")]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    Run { /* daemon options */ },
+    Address { /* address display options */ },
+    Sign { /* transaction signing options */ },
+    List, // List keyshares
+    Status, // Check daemon status
+    Init, // Initialize directories
+}
+```
+
+## Development Workflow
+
+### Building
+1. Use `./build.sh` for full builds with dependency checks
+2. Use `cargo build --release --features wallet-core` for standard builds
+3. Ensure git submodules are initialized: `git submodule update --init --recursive`
+
+### Testing
+1. Run `./test.sh` for comprehensive test suite
+2. Use `cargo test --features wallet-core` for unit tests
+3. Test TypeScript packages with `npm run build && npm test`
+
+### Integration Testing
+1. Start daemon: `./target/release/vultisig run --vault keyshares/test.vult`
+2. Test address generation: `vultisig address --network btc,eth,sol`
+3. Test transaction signing: `vultisig sign --network ETH --payload-file examples/eth_transaction.json`
+4. Test TypeScript integration in `packages/` and `examples/`
+
+## Common Pitfalls to Avoid
+
+1. **Binary Name**: Always use `vultisig` not `vultisigd`
+2. **Path Resolution**: Use absolute paths for keyshare files
+3. **Password Handling**: Support both interactive and non-interactive modes
+4. **Port Conflicts**: Handle gracefully when ports 8787/18080 are in use
+5. **Submodules**: Always initialize git submodules before building
+6. **Feature Flags**: Include `--features wallet-core` for full functionality
+
+## Security Considerations
+
+- Keyshares contain sensitive cryptographic material
+- Use proper file permissions for Unix sockets (0o660)
+- Support encrypted keyshares with secure password prompting
+- Implement proper session management for MPC ceremonies
+- Validate all network inputs and transaction payloads
+
+## Documentation Standards
+
+- Use emoji prefixes in CLI output for better UX (✅ ❌ 🔑 📍 🚀)
+- Provide comprehensive examples in `examples/README.md`
+- Document all supported networks and their address formats
+- Include troubleshooting guides for common issues
+- Maintain clear API documentation for TypeScript packages

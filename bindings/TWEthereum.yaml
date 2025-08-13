@@ -1,0 +1,68 @@
+class: TWEthereum
+static_functions:
+- name: AddressChecksummed
+  rust_name: tw_ethereum_address_checksummed
+  args:
+  - name: address
+    ty: Nonnull < TWString >
+  return_type: NullableMut < TWString >
+  docs:
+  - Returns the checksummed address.
+  - ''
+  - \param address *non-null* string.
+  - \return the checksummed address.
+- name: Eip2645GetPath
+  rust_name: tw_ethereum_eip2645_get_path
+  args:
+  - name: eth_address
+    ty: Nonnull < TWString >
+  - name: layer
+    ty: Nonnull < TWString >
+  - name: application
+    ty: Nonnull < TWString >
+  - name: index
+    ty: Nonnull < TWString >
+  return_type: NullableMut < TWString >
+  docs:
+  - Returns the account path from address.
+  - ''
+  - \param eth_address *non-null* string.
+  - \param layer *non-null* string.
+  - \param application *non-null* string.
+  - \param index *non-null* string.
+  - \return the account path.
+- name: Eip1014Create2Address
+  rust_name: tw_ethereum_eip1014_create2_address
+  args:
+  - name: from
+    ty: Nonnull < TWString >
+  - name: salt
+    ty: Nonnull < TWData >
+  - name: init_code_hash
+    ty: Nonnull < TWData >
+  return_type: NullableMut < TWString >
+  docs:
+  - Returns EIP-1014 Create2 address
+  - ''
+  - \param from *non-null* string.
+  - \param salt *non-null* data.
+  - \param init_code_hash *non-null* data.
+  - \return the EIP-1014 Create2 address.
+- name: Eip1967ProxyInitCode
+  rust_name: tw_ethereum_eip1967_proxy_init_code
+  args:
+  - name: logic_address
+    ty: Nonnull < TWString >
+  - name: data
+    ty: Nonnull < TWData >
+  return_type: NullableMut < TWData >
+  docs:
+  - Returns EIP-1967 proxy init code
+  - ''
+  - \param logic_address *non-null* string.
+  - \param data *non-null* data.
+  - \return the EIP-1967 proxy init code.
+constructors: null
+destructor: null
+methods: null
+properties: null

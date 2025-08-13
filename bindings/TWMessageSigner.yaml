@@ -1,0 +1,48 @@
+class: TWMessageSigner
+static_functions:
+- name: Sign
+  rust_name: tw_message_signer_sign
+  args:
+  - name: coin
+    ty: TWFFICoinType
+  - name: input
+    ty: Nonnull < TWData >
+  return_type: NullableMut < TWData >
+  docs:
+  - Signs an arbitrary message to prove ownership of an address for off-chain services.
+  - ''
+  - \param coin The given coin type to sign the message for.
+  - \param input The serialized data of a signing input (e.g. TW.Ethereum.Proto.MessageSigningInput).
+  - \return The serialized data of a `SigningOutput` proto object. (e.g. TW.Ethereum.Proto.MessageSigningOutput).
+- name: Verify
+  rust_name: tw_message_signer_verify
+  args:
+  - name: coin
+    ty: TWFFICoinType
+  - name: input
+    ty: Nonnull < TWData >
+  return_type: bool
+  docs:
+  - Verifies a signature for a message.
+  - ''
+  - \param coin The given coin type to sign the message for.
+  - \param input The serialized data of a verifying input (e.g. TW.Ethereum.Proto.MessageVerifyingInput).
+  - \return whether the signature is valid.
+- name: PreImageHashes
+  rust_name: tw_message_signer_pre_image_hashes
+  args:
+  - name: coin
+    ty: TWFFICoinType
+  - name: input
+    ty: Nonnull < TWData >
+  return_type: NullableMut < TWData >
+  docs:
+  - Computes preimage hashes of a message.
+  - ''
+  - \param coin The given coin type to sign the message for.
+  - \param input The serialized data of a signing input (e.g. TW.Ethereum.Proto.MessageSigningInput).
+  - \return The serialized data of TW.TxCompiler.PreSigningOutput.
+constructors: null
+destructor: null
+methods: null
+properties: null

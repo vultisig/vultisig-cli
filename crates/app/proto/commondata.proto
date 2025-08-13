@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package commondata;
+
+// SigningRequest represents a request to sign a transaction or message
+message SigningRequest {
+    string session_id = 1;
+    string network = 2;          // "ETH", "BTC", "SOL"
+    string message_type = 3;     // "eth_tx", "btc_psbt", "sol_tx", "eth_typed"
+    bytes payload_hash = 4;      // Hash of the payload for verification
+    bytes payload_bytes = 5;     // Full transaction or message bytes
+    map<string, string> metadata = 6;  // Additional context (chain_id, etc.)
+}
+
+// SigningResult represents the result of a signing operation
+message SigningResult {
+    string session_id = 1;
+    bool success = 2;
+    bytes signature = 3;         // Raw signature bytes
+    bytes signed_tx = 4;         // Complete signed transaction (if applicable)
+    string error_message = 5;    // Error details if success = false
+    map<string, string> metadata = 6;  // Additional result data
+}
+
+// SessionInfo contains connection and session details
+message SessionInfo {
+    string session_id = 1;
+    string connection_type = 2;  // "local", "relay"
+    string host = 3;            // LAN IP for local connections
+    uint32 port = 4;            // Port number
+    string network = 5;         // Target network
+    uint64 timestamp = 6;       // Session creation timestamp
+}

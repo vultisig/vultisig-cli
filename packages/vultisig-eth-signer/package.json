@@ -1,0 +1,31 @@
+{
+  "name": "vultisig-eth-signer",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node dist/test/getaddr.js",
+    "clean": "rm -rf dist",
+    "prepare": "npm run build"
+  },
+  "dependencies": {
+    "ethers": "^6.13.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.12",
+    "typescript": "^5.5.4"
+  }
+}
+
+

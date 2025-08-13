@@ -1,0 +1,5 @@
+websocket_port: 8787
+http_port: 18080
+enable_mobile_signing: true
+use_vultisig_relay: false
+enable_local_relay: true

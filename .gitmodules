@@ -1,0 +1,12 @@
+[submodule "third_party/wallet-core"]
+	path = third_party/wallet-core
+	url = https://github.com/trustwallet/wallet-core.git
+[submodule "third_party/dkls23"]
+	path = third_party/dkls23
+	url = https://github.com/silence-laboratories/dkls23.git
+[submodule "third_party/multi-party-schnorr"]
+	path = third_party/multi-party-schnorr
+	url = https://github.com/silence-laboratories/multi-party-schnorr.git
+[submodule "third_party/commondata"]
+	path = third_party/commondata
+	url = https://github.com/vultisig/commondata.git
