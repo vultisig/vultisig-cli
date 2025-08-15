@@ -16,15 +16,16 @@ use crate::network;
 #[cfg(test)]
 use futures_util;
 
-/// Local network discovery service for Vultisig local mode
-/// This provides the HTTP service that mobile apps connect to when useVultisigRelay is false
-pub struct LocalDiscoveryServer {
+/// Local server for mobile app discovery and connection in Vultisig local mode
+/// This provides the HTTP service that mobile apps connect to when using local mode
+pub struct LocalServer {
     session_manager: Arc<SessionManager>,
     port: u16,
     websocket_port: u16,
 }
 
 /// Discovery response sent to mobile apps
+/// This is the canonical definition used by both local and relay servers
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DiscoveryResponse {
     pub session_id: String,
@@ -34,6 +35,7 @@ pub struct DiscoveryResponse {
 }
 
 /// Session info for discovery
+/// This is the canonical definition used by both local and relay servers
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SessionInfo {
     pub session_id: String,
@@ -41,7 +43,7 @@ pub struct SessionInfo {
     pub status: String,
 }
 
-impl LocalDiscoveryServer {
+impl LocalServer {
     pub fn new(session_manager: Arc<SessionManager>, websocket_port: u16) -> Self {
         Self {
             session_manager,
@@ -58,7 +60,7 @@ impl LocalDiscoveryServer {
         }
     }
 
-    /// Start the local discovery HTTP server with mDNS advertisement
+    /// Start the local server HTTP endpoints with mDNS advertisement
     pub async fn start(&self) -> Result<()> {
         // Bind to all interfaces for network discovery
         let addr = SocketAddr::from(([0, 0, 0, 0], self.port));
@@ -108,7 +110,7 @@ impl LocalDiscoveryServer {
             .or(health_route)
             .with(warp::cors().allow_any_origin());
 
-        info!("Local discovery server starting on {}", addr);
+        info!("Local server starting on {}", addr);
         
         warp::serve(routes)
             .run(addr)
@@ -287,24 +289,26 @@ async fn handle_sessions_list(
     Ok(warp::reply::json(&sessions))
 }
 
-/// Factory function to create local discovery server
-pub fn create_local_discovery_server(
+/// Factory function to create local server
+pub fn create_local_server(
     session_manager: Arc<SessionManager>,
     websocket_port: u16,
-) -> LocalDiscoveryServer {
-    LocalDiscoveryServer::new(session_manager, websocket_port)
+) -> LocalServer {
+    LocalServer::new(session_manager, websocket_port)
 }
+
+// Route creation function removed - local_server.rs now runs as separate HTTP server
 
 /// Standalone function to advertise a service via mDNS
 pub async fn advertise_service(service_name: String) -> Result<()> {
     let port = 18080; // Standard Vultisig discovery port
-    LocalDiscoveryServer::advertise_mdns_service(service_name, port).await
+    LocalServer::advertise_mdns_service(service_name, port).await
 }
 
 /// Start mDNS service for discovery (main entry point used by lib.rs)
 pub async fn start_mdns_service(session_manager: Arc<SessionManager>) -> Result<()> {
     let websocket_port = 8787; // Default WebSocket port
-    let server = LocalDiscoveryServer::new(session_manager, websocket_port);
+    let server = LocalServer::new(session_manager, websocket_port);
     
     // Start advertising the service
     server.advertise_service("Vultisig-Daemon".to_string()).await?;
@@ -315,7 +319,7 @@ pub async fn start_mdns_service(session_manager: Arc<SessionManager>) -> Result<
 
 /// Start mDNS service with specific ports (used by lib.rs when ports are dynamically assigned)
 pub async fn start_mdns_service_with_ports(session_manager: Arc<SessionManager>, websocket_port: u16, discovery_port: u16) -> Result<()> {
-    let server = LocalDiscoveryServer::with_port(session_manager, websocket_port, discovery_port);
+    let server = LocalServer::with_port(session_manager, websocket_port, discovery_port);
     
     // Start advertising the service
     server.advertise_service("Vultisig-Daemon".to_string()).await?;
@@ -340,14 +344,14 @@ mod tests {
         Arc::new(SessionManager::new())
     }
 
-    fn create_test_discovery_server() -> LocalDiscoveryServer {
+    fn create_test_local_server() -> LocalServer {
         let session_manager = create_test_session_manager();
-        LocalDiscoveryServer::new(session_manager, 8787)
+        LocalServer::new(session_manager, 8787)
     }
 
     #[test]
-    fn test_local_discovery_server_creation() {
-        let server = create_test_discovery_server();
+    fn test_local_server_creation() {
+        let server = create_test_local_server();
         assert_eq!(server.port, 18080);
         assert_eq!(server.websocket_port, 8787);
     }
@@ -355,14 +359,14 @@ mod tests {
     #[test]
     fn test_factory_function() {
         let session_manager = create_test_session_manager();
-        let server = create_local_discovery_server(session_manager, 9999);
+        let server = create_local_server(session_manager, 9999);
         assert_eq!(server.port, 18080);
         assert_eq!(server.websocket_port, 9999);
     }
 
     #[tokio::test]
     async fn test_port_availability_check() {
-        let server = create_test_discovery_server();
+        let server = create_test_local_server();
         
         // This test may fail if port 18080 is already in use
         // In CI environments, we might need to use a different approach
@@ -525,7 +529,7 @@ mod tests {
         let port = 18080;
         
         let advertise_task = tokio::spawn(async move {
-            LocalDiscoveryServer::advertise_mdns_service(service_name, port).await
+            LocalServer::advertise_mdns_service(service_name, port).await
         });
         
         // Let it run for a brief moment to start up
@@ -599,7 +603,7 @@ mod tests {
         // This should handle errors gracefully
         
         let invalid_service_name = "".to_string();
-        let result = LocalDiscoveryServer::advertise_mdns_service(invalid_service_name, 0).await;
+        let result = LocalServer::advertise_mdns_service(invalid_service_name, 0).await;
         
         // The function should handle invalid inputs gracefully
         // Either succeed or fail with a proper error

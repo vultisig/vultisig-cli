@@ -43,6 +43,7 @@ pub struct RelayServer {
     storage: RelayStorage,
     port: u16,
     session_manager: Option<Arc<crate::session::SessionManager>>,
+    mpc_coordinator: Option<Arc<crate::mpc_coordinator::MpcCoordinator>>,
     websocket_port: u16,
 }
 
@@ -74,21 +75,14 @@ pub struct SessionResponse {
     pub parties: Option<Vec<String>>,
 }
 
-/// Discovery response sent to mobile apps
-#[derive(Debug, Serialize, Deserialize)]
-pub struct DiscoveryResponse {
-    pub session_id: String,
-    pub service_name: String,
-    pub websocket_url: String,
-    pub status: String,
-}
+// Discovery structures moved to local_server.rs to avoid duplication
 
-/// Session info for discovery
+/// Session status response for API (matches QR polling requirements)
 #[derive(Debug, Serialize, Deserialize)]
-pub struct SessionInfo {
+pub struct SessionStatusResponse {
     pub session_id: String,
-    pub participants: Vec<String>,
     pub status: String,
+    pub metadata: std::collections::HashMap<String, String>,
 }
 
 impl RelayStorage {
@@ -241,6 +235,7 @@ impl RelayServer {
             storage: RelayStorage::new(),
             port,
             session_manager: None,
+            mpc_coordinator: None,
             websocket_port: 8787,
         }
     }
@@ -251,6 +246,23 @@ impl RelayServer {
             storage: RelayStorage::new(),
             port,
             session_manager: Some(session_manager),
+            mpc_coordinator: None,
+            websocket_port,
+        }
+    }
+
+    /// Create new relay server with discovery and MPC status support
+    pub fn with_mpc_support(
+        port: u16, 
+        session_manager: Arc<crate::session::SessionManager>, 
+        mpc_coordinator: Arc<crate::mpc_coordinator::MpcCoordinator>,
+        websocket_port: u16
+    ) -> Self {
+        Self {
+            storage: RelayStorage::new(),
+            port,
+            session_manager: Some(session_manager),
+            mpc_coordinator: Some(mpc_coordinator),
             websocket_port,
         }
     }
@@ -283,12 +295,11 @@ impl RelayServer {
         let storage6 = storage.clone();
         let storage7 = storage.clone();
         let storage8 = storage.clone();
-        let storage9 = storage.clone();
+        let _storage9 = storage.clone();
         let storage10 = storage.clone();
         
-        let session_mgr1 = self.session_manager.clone();
-        let session_mgr2 = self.session_manager.clone();
-        let websocket_port = self.websocket_port;
+        let session_mgr_status = self.session_manager.clone();
+        let mpc_coordinator = self.mpc_coordinator.clone();
 
         // POST /{sessionId} - Register party in session
         let register_route = warp::path!(String)
@@ -342,24 +353,13 @@ impl RelayServer {
             .and(warp::any().map(move || storage8.clone()))
             .and_then(handle_get_messages);
 
-        // Discovery routes (for mobile app discovery)
-        let discovery_route = warp::path!("discovery" / String)
+        // GET /api/session/{sessionId}/status - Get session status for QR page polling
+        let session_status_route = warp::path!("api" / "session" / String / "status")
             .and(warp::get())
-            .and(warp::any().map(move || session_mgr1.clone()))
-            .and(warp::any().map(move || websocket_port))
-            .and_then(handle_discovery_request);
-
-        let join_route = warp::path!("join" / String)
-            .and(warp::post())
-            .and(warp::body::json())
-            .and(warp::any().map(move || session_mgr2.clone()))
-            .and(warp::any().map(move || websocket_port))
-            .and_then(handle_join_request);
-
-        let sessions_route = warp::path("sessions")
-            .and(warp::get())
-            .and(warp::any().map(move || storage9.clone()))
-            .and_then(handle_sessions_list);
+            .and(warp::any().map(move || session_mgr_status.clone()))
+            .and(warp::any().map(move || mpc_coordinator.clone()))
+            .and(warp::any().map(move || storage10.clone()))
+            .and_then(handle_session_status);
 
         // GET /health - Health check  
         let health_route = warp::path("health")
@@ -374,9 +374,7 @@ impl RelayServer {
             .or(check_complete_route)
             .or(send_message_route)
             .or(get_messages_route)
-            .or(discovery_route)
-            .or(join_route)
-            .or(sessions_route)
+            .or(session_status_route)
             .or(health_route)
             .with(warp::cors().allow_any_origin())
             .with(warp::log("relay_server"));
@@ -668,83 +666,96 @@ pub fn create_relay_server_with_discovery(
     RelayServer::with_discovery(port, session_manager, websocket_port)
 }
 
-// Discovery handler functions (migrated from local_discovery.rs)
+/// Factory function to create relay server with full MPC status support
+pub fn create_relay_server_with_mpc_support(
+    port: u16, 
+    session_manager: Arc<crate::session::SessionManager>, 
+    mpc_coordinator: Arc<crate::mpc_coordinator::MpcCoordinator>,
+    websocket_port: u16
+) -> RelayServer {
+    RelayServer::with_mpc_support(port, session_manager, mpc_coordinator, websocket_port)
+}
 
-/// Handle discovery request from mobile app
-async fn handle_discovery_request(
+// Discovery functionality handled by local_server.rs
+
+/// Handle session status request for QR polling
+async fn handle_session_status(
     session_id: String,
     session_manager: Option<Arc<crate::session::SessionManager>>,
-    websocket_port: u16,
+    mpc_coordinator: Option<Arc<crate::mpc_coordinator::MpcCoordinator>>,
+    _storage: RelayStorage,
 ) -> Result<impl warp::Reply, warp::Rejection> {
-    debug!("Discovery request for session: {}", session_id);
+    debug!("Session status request for: {}", session_id);
 
     if let Some(session_mgr) = session_manager {
         match session_mgr.get_session(&session_id).await {
             Some(session) => {
-                // Get local IP address
-                let local_ip = network::detect_lan_ip()
-                    .unwrap_or_else(|_| std::net::Ipv4Addr::new(127, 0, 0, 1));
-
-                let websocket_url = format!("ws://{}:{}", local_ip, websocket_port);
-                
-                let response = DiscoveryResponse {
-                    session_id: session.id,
-                    service_name: "Vultisig-Daemon".to_string(),
-                    websocket_url,
-                    status: format!("{:?}", session.status),
+                // Get MPC coordinator state if available
+                let mpc_state = if let Some(coordinator) = &mpc_coordinator {
+                    coordinator.get_session_state(&session_id).await
+                } else {
+                    None
                 };
 
-                Ok(warp::reply::json(&response))
-            }
-            None => {
-                let error_response = serde_json::json!({
-                    "error": "Session not found",
-                    "session_id": session_id
-                });
-                Ok(warp::reply::json(&error_response))
-            }
-        }
-    } else {
-        // No session manager - discovery not supported
-        let error_response = serde_json::json!({
-            "error": "Discovery not supported",
-            "session_id": session_id
-        });
-        Ok(warp::reply::json(&error_response))
-    }
-}
+                // Convert status to API format - MPC states take precedence
+                let status_string = match (&session.status, &mpc_state) {
+                    // MPC states take precedence when available
+                    (_, Some(crate::mpc_coordinator::MpcSigningState::WaitingForMobile)) => "waiting_for_mobile".to_string(),
+                    (_, Some(crate::mpc_coordinator::MpcSigningState::Round1InProgress)) => "round1_in_progress".to_string(),
+                    (_, Some(crate::mpc_coordinator::MpcSigningState::Round2InProgress)) => "round2_in_progress".to_string(),
+                    (_, Some(crate::mpc_coordinator::MpcSigningState::Round3InProgress)) => "round3_in_progress".to_string(),
+                    (_, Some(crate::mpc_coordinator::MpcSigningState::Completed)) => "completed".to_string(),
+                    (_, Some(crate::mpc_coordinator::MpcSigningState::Failed(error))) => {
+                        let mut metadata = session.metadata.clone();
+                        metadata.insert("error".to_string(), error.clone());
+                        
+                        let response = SessionStatusResponse {
+                            session_id: session.id,
+                            status: "failed".to_string(),
+                            metadata,
+                        };
+                        return Ok(warp::reply::json(&response));
+                    }
+                    // Fallback to session manager status when no MPC state
+                    (crate::session::SessionStatus::Pending, None) => "pending".to_string(),
+                    (crate::session::SessionStatus::WaitingForMobile, None) => "waiting_for_mobile".to_string(),
+                    (crate::session::SessionStatus::Completed, None) => "completed".to_string(),
+                    (crate::session::SessionStatus::Failed(error), None) => {
+                        let mut metadata = session.metadata.clone();
+                        metadata.insert("error".to_string(), error.clone());
+                        
+                        let response = SessionStatusResponse {
+                            session_id: session.id,
+                            status: "failed".to_string(),
+                            metadata,
+                        };
+                        return Ok(warp::reply::json(&response));
+                    }
+                };
 
-/// Handle join request from mobile app
-async fn handle_join_request(
-    session_id: String,
-    _body: serde_json::Value,
-    session_manager: Option<Arc<crate::session::SessionManager>>,
-    websocket_port: u16,
-) -> Result<impl warp::Reply, warp::Rejection> {
-    info!("Mobile app joining session: {}", session_id);
-
-    if let Some(session_mgr) = session_manager {
-        match session_mgr.get_session(&session_id).await {
-            Some(_session) => {
-                // Update session status to indicate mobile app has joined
-                if let Err(e) = session_mgr
-                    .update_session_status(&session_id, crate::session::SessionStatus::WaitingForMobile)
-                    .await
-                {
-                    error!("Failed to update session status: {}", e);
+                // Check for signing result to add transaction hash
+                let mut metadata = session.metadata.clone();
+                if let Some(result) = session_mgr.get_result(&session_id).await {
+                    if result.success {
+                        // Add transaction hash if available
+                        if let Some(tx_hash) = result.metadata.get("tx_hash") {
+                            metadata.insert("tx_hash".to_string(), tx_hash.clone());
+                        }
+                        // Add signature info
+                        if !result.signature.is_empty() {
+                            metadata.insert("signature_length".to_string(), result.signature.len().to_string());
+                            metadata.insert("has_signature".to_string(), "true".to_string());
+                        }
+                    } else if !result.error_message.is_empty() {
+                        // Add error from result if not already present
+                        metadata.insert("error".to_string(), result.error_message);
+                    }
                 }
 
-                // Get local IP address
-                let local_ip = network::detect_lan_ip()
-                    .unwrap_or_else(|_| std::net::Ipv4Addr::new(127, 0, 0, 1));
-
-                let websocket_url = format!("ws://{}:{}", local_ip, websocket_port);
-                
-                let response = DiscoveryResponse {
-                    session_id,
-                    service_name: "Vultisig-Daemon".to_string(),
-                    websocket_url,
-                    status: "ready".to_string(),
+                let response = SessionStatusResponse {
+                    session_id: session.id,
+                    status: status_string,
+                    metadata,
                 };
 
                 Ok(warp::reply::json(&response))
@@ -758,26 +769,13 @@ async fn handle_join_request(
             }
         }
     } else {
-        // No session manager - discovery not supported
+        // No session manager - status not available
         let error_response = serde_json::json!({
-            "error": "Discovery not supported",
+            "error": "Session management not supported",
             "session_id": session_id
         });
         Ok(warp::reply::json(&error_response))
     }
-}
-
-/// Handle sessions list request
-async fn handle_sessions_list(
-    _storage: RelayStorage,
-) -> Result<impl warp::Reply, warp::Rejection> {
-    debug!("Sessions list request");
-
-    // For now, return empty list since we don't have a way to list all sessions
-    // This could be enhanced to return active sessions from RelayStorage
-    let sessions: Vec<SessionInfo> = vec![];
-    
-    Ok(warp::reply::json(&sessions))
 }
 
 #[cfg(test)]

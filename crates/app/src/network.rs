@@ -3,6 +3,7 @@ use if_addrs::{get_if_addrs, IfAddr};
 use std::net::Ipv4Addr;
 use std::sync::Arc;
 use serde_json::{json, Value};
+use base64::Engine;
 
 use crate::session::SessionManager;
 use crate::mpc_coordinator::MpcCoordinator;
@@ -513,6 +514,36 @@ async fn handle_sign_transaction(
     };
 
     tracing::info!("Starting transaction signing: {} in {:?} mode", network, signing_mode);
+
+    // Generate QR code for mobile app scanning according to spec
+    let vault_public_key = hex::encode(&public_key_bytes);
+    
+    // Create keysign payload with session data for mobile app
+    let keysign_payload = serde_json::json!({
+        "sessionId": session_id,
+        "serviceName": format!("vultisig-{}", &session_id[..8]),
+        "encryptionKeyHex": session_params.encryption_key,
+        "useVultisigRelay": matches!(signing_mode, SigningMode::Relay),
+        "keysignPayload": payload
+    });
+    
+    // Convert to base64 (simplified - in production would use 7zip compression per spec)
+    let json_data = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, 
+                                         keysign_payload.to_string().as_bytes());
+    
+    // Generate QR code URI using existing function
+    let qr_uri = crate::qr::generate_vultisig_keysign_uri(&vault_public_key, &json_data);
+    
+    // Display QR code and open in browser using existing function
+    let connection_type = match signing_mode {
+        SigningMode::Relay => "relay",
+        SigningMode::Local => "local",
+    };
+    
+    if let Err(e) = crate::qr::display_qr_with_instructions(&session_id, &qr_uri, network, connection_type) {
+        tracing::warn!("Failed to display QR code: {}", e);
+        // Continue with signing even if QR display fails
+    }
 
     // Start signing process (this would be async in real implementation)
     match coordinator.sign_transaction(tx_payload, session_params).await {

@@ -25,8 +25,8 @@ pub mod broadcaster;
 pub mod relay_client;
 pub mod relay_server;
 pub mod keysign_message;
-pub mod dense_qr;
-pub mod local_discovery;
+
+pub mod local_server;
 pub mod wallet_core_ffi;
 pub mod wallet_core;
 pub mod commondata;
@@ -161,18 +161,20 @@ pub async fn run_server(
         }
     });
     
-    // Start unified relay server with discovery (matches Go-TS spec)
+    // Start unified relay server with discovery and MPC status (matches Go-TS spec)
     if config.enable_local_relay {
         let relay_port = config.http_port;
         let relay_session_manager = session_manager.clone();
+        let relay_mpc_coordinator = mpc_coordinator.clone();
         let relay_websocket_port = config.websocket_port;
         let enable_mobile_signing = config.enable_mobile_signing;
         let _relay_handle = tokio::spawn(async move {
             let relay_server = if enable_mobile_signing {
-                // Create relay server with discovery support
-                relay_server::create_relay_server_with_discovery(
+                // Create relay server with full MPC status support
+                relay_server::create_relay_server_with_mpc_support(
                     relay_port, 
                     relay_session_manager, 
+                    relay_mpc_coordinator,
                     relay_websocket_port
                 )
             } else {
@@ -184,17 +186,24 @@ pub async fn run_server(
                 error!("Relay server error: {}", e);
             }
         });
-        info!("Unified relay server (with discovery): http://localhost:{}", config.http_port);
+        info!("Relay server (MPC operations): http://localhost:{}", config.http_port);
     }
 
-    // Start mDNS advertisement service (separate from HTTP server)
+    // Start local server for mobile app discovery (separate from relay server)
     if config.enable_mobile_signing {
-        let discovery_session_manager = session_manager.clone();
+        let local_session_manager = session_manager.clone();
+        let local_websocket_port = config.websocket_port;
         tokio::spawn(async move {
-            if let Err(e) = local_discovery::advertise_service("Vultisig-Daemon".to_string()).await {
-                error!("mDNS advertisement error: {}", e);
+            // Start local server on standard discovery port 18080
+            if let Err(e) = local_server::start_mdns_service_with_ports(
+                local_session_manager, 
+                local_websocket_port, 
+                18080  // Standard Vultisig discovery port
+            ).await {
+                error!("Local server error: {}", e);
             }
         });
+        info!("Local server (mobile discovery): http://localhost:18080");
     }
     
     info!("All services started successfully");
@@ -319,18 +328,20 @@ pub async fn run_server_with_keyshare(
         }
     });
     
-    // Start unified relay server with discovery (matches Go-TS spec)
+    // Start unified relay server with discovery and MPC status (matches Go-TS spec)
     if config.enable_local_relay {
         let relay_port = config.http_port;
         let relay_session_manager = session_manager.clone();
+        let relay_mpc_coordinator = mpc_coordinator.clone();
         let relay_websocket_port = config.websocket_port;
         let enable_mobile_signing = config.enable_mobile_signing;
         let _relay_handle = tokio::spawn(async move {
             let relay_server = if enable_mobile_signing {
-                // Create relay server with discovery support
-                relay_server::create_relay_server_with_discovery(
+                // Create relay server with full MPC status support
+                relay_server::create_relay_server_with_mpc_support(
                     relay_port, 
                     relay_session_manager, 
+                    relay_mpc_coordinator,
                     relay_websocket_port
                 )
             } else {
@@ -342,14 +353,14 @@ pub async fn run_server_with_keyshare(
                 error!("Relay server error: {}", e);
             }
         });
-        info!("Unified relay server (with discovery): http://localhost:{}", config.http_port);
+        info!("Relay server (MPC operations): http://localhost:{}", config.http_port);
     }
 
     // Start mDNS advertisement service (separate from HTTP server)
     if config.enable_mobile_signing {
         let _discovery_session_manager = session_manager.clone();
         tokio::spawn(async move {
-            if let Err(e) = local_discovery::advertise_service("Vultisig-Daemon".to_string()).await {
+            if let Err(e) = local_server::advertise_service("Vultisig-Daemon".to_string()).await {
                 error!("mDNS advertisement error: {}", e);
             }
         });

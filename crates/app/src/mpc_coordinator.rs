@@ -35,7 +35,7 @@ struct MpcSigningSession {
 }
 
 #[derive(Debug, Clone)]
-enum MpcSigningState {
+pub enum MpcSigningState {
     WaitingForMobile,
     Round1InProgress,
     Round2InProgress, 

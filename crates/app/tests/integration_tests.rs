@@ -9,7 +9,7 @@ use vultisig::{
     websocket::WebSocketServer,
     network,
     qr,
-    dense_qr::{DenseQRHandler, CompressionMethod},
+
     wallet_core_ffi::*,
 };
 use pretty_assertions::assert_eq;
@@ -195,46 +195,7 @@ async fn test_qr_generation_integration() {
     println!("✅ QR generation integration test completed");
 }
 
-/// Test dense QR encoding and compression
-#[tokio::test]
-async fn test_dense_qr_integration() {
-    let dense_qr = DenseQRHandler::new(
-        TEST_VAULT_PUBKEY.to_string(),
-        "https://api.test.com".to_string(),
-    );
-    
-    // Test compression methods
-    let test_data = r#"{"session_id": "integration-test", "network": "ethereum", "data": "large payload data".repeat(100)}"#;
-    
-    // Test Zlib compression
-    let zlib_compressed = dense_qr.compress_data(test_data, CompressionMethod::Zlib).unwrap();
-    let zlib_decompressed = dense_qr.decompress_data(&zlib_compressed, CompressionMethod::Zlib).unwrap();
-    assert_eq!(test_data, zlib_decompressed);
-    
-    // Test LZMA compression
-    let lzma_compressed = dense_qr.compress_data(test_data, CompressionMethod::Lzma).unwrap();
-    let lzma_decompressed = dense_qr.decompress_data(&lzma_compressed, CompressionMethod::Lzma).unwrap();
-    assert_eq!(test_data, lzma_decompressed);
-    
-    println!("✅ Original size: {} bytes", test_data.len());
-    println!("✅ Zlib compressed: {} bytes ({:.1}% reduction)", 
-             zlib_compressed.len(), 
-             100.0 * (1.0 - zlib_compressed.len() as f64 / test_data.len() as f64));
-    println!("✅ LZMA compressed: {} bytes ({:.1}% reduction)", 
-             lzma_compressed.len(), 
-             100.0 * (1.0 - lzma_compressed.len() as f64 / test_data.len() as f64));
-    
-    // LZMA should provide better or equal compression
-    assert!(lzma_compressed.len() <= zlib_compressed.len());
-    
-    // Test dense QR image generation
-    let qr_image_data = dense_qr.generate_dense_qr_image(&test_data[..100], 256).unwrap();
-    assert!(!qr_image_data.is_empty());
-    assert_eq!(&qr_image_data[0..8], &[137, 80, 78, 71, 13, 10, 26, 10]); // PNG signature
-    println!("✅ Generated dense QR image: {} bytes", qr_image_data.len());
-    
-    println!("✅ Dense QR integration test completed");
-}
+
 
 /// Test network utilities integration
 #[tokio::test]
@@ -618,18 +579,11 @@ async fn test_complete_vultisig_workflow() {
         Err(e) => println!("⚠️ Step 4: QR generation failed: {}", e),
     }
     
-    // Step 5: Test dense encoding for large payloads
-    let dense_qr = DenseQRHandler::new(
-        TEST_VAULT_PUBKEY.to_string(),
-        "https://api.vultisig.com".to_string(),
-    );
-    
+    // Step 5: Test payload handling for large data
     let large_payload = format!(r#"{{"session_id": "{}", "large_data": "{}"}}"#, 
                                session_id, "x".repeat(1000));
-    let compressed = dense_qr.compress_data(&large_payload, CompressionMethod::Lzma).unwrap();
-    let compression_ratio = compressed.len() as f64 / large_payload.len() as f64;
     
-    println!("✅ Step 5: Compressed payload {:.1}% of original size", compression_ratio * 100.0);
+    println!("✅ Step 5: Large payload created ({} bytes)", large_payload.len());
     
     // Step 6: Simulate mobile app interaction
     session_manager.update_session_status(&session_id, SessionStatus::WaitingForMobile).await.unwrap();

@@ -1,32 +1,227 @@
-# Transaction Signing Specification for Vultisig CLI
+# Vultisig MPC Transaction Signing & Relay Server Specification
 
 ## Overview
 
-This document provides a comprehensive specification for how applications can prepare transactions, invoke the MPC (Multi-Party Computation) engine, start sessions in both relay and local modes, conduct the MPC keysign ceremony, and broadcast transactions in the Vultisig ecosystem.
+This document provides a comprehensive specification for the Vultisig Multi-Party Computation (MPC) system, covering both the relay server infrastructure and the complete transaction signing workflow. The system enables secure, distributed transaction signing across multiple devices using threshold cryptography, supporting both local and remote relay modes for message coordination.
 
-## Architecture Overview
+## System Architecture
 
 ```mermaid
 graph TD
-    A["Application"] --> B["Transaction Preparation"]
+    A["Vultisig Application"] --> B["Transaction Preparation"]
     B --> C["MPC Session Initialization"]
     C --> D{"Mode Selection"}
-    D -->|Relay Mode| E["Remote Relay Server"]
+    D -->|Relay Mode| E["Remote Relay Server<br/>api.vultisig.com"]
     D -->|Local Mode| F["Local Relay Server<br/>Port 18080"]
-    E --> G["MPC Keysign Ceremony"]
-    F --> G
-    G --> H["Signature Generation"]
-    H --> I["Transaction Compilation"]
-    I --> J["Transaction Broadcasting"]
     
-    K["Vault & Key Shares"] --> G
-    L["Blockchain-Specific<br/>Input Data"] --> B
-    M["Participant Devices"] --> C
+    F --> G["Mediator Server<br/>mediator/mediator.go"]
+    G --> H["vultisig-relay Library"]
+    H --> I["In-Memory Storage"]
+    H --> J["HTTP Server"]
+    
+    G --> K["mDNS Service Discovery<br/>hashicorp/mdns"]
+    K --> L["Service Advertisement<br/>_http._tcp"]
+    K --> M["Service Discovery<br/>DiscoveryService"]
+    
+    E --> N["MPC Keysign Ceremony"]
+    F --> N
+    N --> O["Message Exchange & Encryption"]
+    O --> P["Signature Generation"]
+    P --> Q["Transaction Compilation"]
+    Q --> R["Transaction Broadcasting"]
+    
+    S["Vault & Key Shares"] --> N
+    T["Blockchain-Specific<br/>Input Data"] --> B
+    U["Participant Devices"] --> C
+    
+    V["Frontend TypeScript"] --> W["MPC Operations"]
+    W --> X["DKLS Class<br/>core/mpc/dkls/dkls.ts"]
+    W --> Y["Schnorr Class<br/>core/mpc/schnorr/schnorrKeygen.ts"]
+    W --> Z["Keysign Function<br/>core/mpc/keysign/index.ts"]
+    
+    X --> AA["sendMpcRelayMessage<br/>core/mpc/message/relay/send.ts"]
+    Y --> AA
+    Z --> AA
+    
+    AA --> BB["HTTP POST<br/>/message/sessionId"]
+    BB --> J
+    
+    CC["getMpcRelayMessages<br/>core/mpc/message/relay/get.ts"] --> DD["HTTP GET<br/>/message/sessionId/partyId"]
+    DD --> J
 ```
 
-## 1. Transaction Preparation
+# Part I: Relay Server Infrastructure
 
-### 1.1 Transaction Input Data Generation
+## 1. Core Relay Components
+
+### 1.1 Mediator Server (`mediator/mediator.go`)
+
+The mediator server is the core component that wraps the external `github.com/vultisig/vultisig-relay` library.
+
+**Key Features:**
+- Embedded HTTP server on port 18080
+- In-memory storage for session management
+- mDNS service advertisement for network discovery
+
+**Implementation:**
+```go
+func NewRelayServer() (*Server, error) {
+    store, err := storage.NewInMemoryStorage()
+    if err != nil {
+        return nil, err
+    }
+    s := server.NewServer(MediatorPort, store)
+    return &Server{
+        localServer: s,
+    }, nil
+}
+```
+
+**Methods:**
+- `StartServer() error`: Starts the HTTP relay server
+- `StopServer() error`: Cleanly shuts down the server
+- `AdvertiseMediator(name string) error`: Advertises service via mDNS
+- `DiscoveryService(name string) (string, error)`: Discovers other relay servers on the network
+
+### 1.2 Session Management (`relay/session.go`)
+
+Provides comprehensive session lifecycle management for MPC operations.
+
+**Session Lifecycle:**
+1. **Registration**: Parties register with their unique IDs
+2. **Start**: Coordinator starts session when all parties join
+3. **Message Exchange**: Encrypted MPC messages relayed between parties
+4. **Completion**: Session completion tracking and cleanup
+
+**Key Methods:**
+- `StartSession(sessionID string, parties []string) error`: Initiates a new MPC session
+- `RegisterSession(sessionID string, key string) error`: Registers a party in the session
+- `WaitForSessionStart(ctx context.Context, sessionID string) ([]string, error)`: Waits for all parties to join
+- `CompleteSession(sessionID, localPartyID string) error`: Marks session as complete
+- `EndSession(sessionID string) error`: Terminates and cleans up session
+
+### 1.3 Message Handling (`relay/messenger.go`)
+
+Implements secure message transmission with encryption and integrity verification.
+
+**Security Features:**
+- AES-CBC encryption with PKCS7 padding
+- MD5 hash for message integrity
+- Sequence numbering to prevent replay attacks
+- Base64 encoding for safe HTTP transport
+
+**Message Structure:**
+```go
+type Message struct {
+    SessionID  string   `json:"session_id"`
+    From       string   `json:"from"`
+    To         []string `json:"to"`
+    Body       string   `json:"body"`       // Encrypted content
+    Hash       string   `json:"hash"`       // MD5 hash for integrity
+    SequenceNo int64    `json:"sequence_no"` // Anti-replay sequence
+}
+```
+
+**Encryption Process:**
+1. Encrypt message body using AES-CBC
+2. Apply PKCS7 padding
+3. Generate random IV
+4. Base64 encode the result
+5. Calculate MD5 hash for integrity
+
+### 1.4 Service Discovery (mDNS)
+
+The relay server implements Multicast DNS (mDNS) for automatic network discovery:
+
+**Service Advertisement:**
+- Service Type: `_http._tcp`
+- Port: 18080
+- Hostname: `{hostname}.local`
+- Text Records: Service name for identification
+
+**Discovery Process:**
+1. Query for `_http._tcp` services
+2. Filter by service name in text records
+3. Extract IP address and port
+4. Return connection string format: `{ip}:{port}`
+
+**Benefits:**
+- Zero-configuration networking
+- Automatic discovery of local relay servers
+- Fallback to remote relay servers when local unavailable
+
+## 2. Server Configuration
+
+### 2.1 Supported Server Types
+
+```typescript
+export const mpcServerTypes = ['relay', 'local'] as const
+export const mpcServerUrl: Record<MpcServerType, string> = {
+  relay: `${rootApiUrl}/router`,    // Remote relay server
+  local: 'http://127.0.0.1:18080', // Local relay server
+}
+```
+
+### 2.2 Runtime Configuration
+
+- **Local Mode**: Uses embedded relay server (port 18080)
+- **Remote Mode**: Connects to Vultisig's hosted relay service
+- **Auto-Discovery**: Automatically discovers local servers via mDNS
+
+## 3. HTTP API Reference
+
+### 3.1 HTTP Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/start/{sessionId}` | Start MPC session |
+| GET | `/start/{sessionId}` | Check session start status |
+| POST | `/{sessionId}` | Register party in session |
+| GET | `/{sessionId}` | Get session parties |
+| DELETE | `/{sessionId}` | End session |
+| POST | `/message/{sessionId}` | Send MPC message |
+| GET | `/message/{sessionId}/{partyId}` | Get messages for party |
+| POST | `/complete/{sessionId}` | Mark session complete |
+| GET | `/complete/{sessionId}` | Check completion status |
+| POST | `/complete/{sessionId}/keysign` | Mark keysign complete |
+| GET | `/complete/{sessionId}/keysign` | Check keysign status |
+
+### 3.2 Go API Methods
+
+**Mediator Server:**
+- `NewRelayServer() (*Server, error)`
+- `StartServer() error`
+- `StopServer() error`
+- `AdvertiseMediator(name string) error`
+- `DiscoveryService(name string) (string, error)`
+
+**Session Client:**
+- `NewClient(vultisigRelay string) *Client`
+- `StartSession(sessionID string, parties []string) error`
+- `RegisterSession(sessionID string, key string) error`
+- `WaitForSessionStart(ctx context.Context, sessionID string) ([]string, error)`
+- `CompleteSession(sessionID, localPartyID string) error`
+- `EndSession(sessionID string) error`
+
+**Messenger:**
+- `NewMessengerImp(server, sessionID, hexEncryptionKey string, messageID string) (*MessengerImp, error)`
+- `Send(from, to, body string) error`
+
+### 3.3 TypeScript API Functions
+
+**Message Relay:**
+- `sendMpcRelayMessage(input: SendMpcRelayMessageInput): Promise<void>`
+- `getMpcRelayMessages(input: GetMpcRelayMessagesInput): Promise<MpcRelayMessage[]>`
+
+**Message Encryption:**
+- `toMpcServerMessage(body: Uint8Array, hexEncryptionKey: string): string`
+- `fromMpcServerMessage(body: string, hexEncryptionKey: string): Buffer`
+
+# Part II: Transaction Signing Workflow
+
+## 4. Transaction Preparation
+
+### 4.1 Transaction Input Data Generation
 
 The first step involves preparing blockchain-specific transaction input data using the `getTxInputData` function:
 
@@ -42,7 +237,7 @@ const inputs = getTxInputData({
 })
 ```
 
-### 1.2 Blockchain-Specific Handlers
+### 4.2 Blockchain-Specific Handlers
 
 The system supports multiple blockchain types through dedicated handlers:
 
@@ -59,7 +254,7 @@ The system supports multiple blockchain types through dedicated handlers:
 | `tron` | `getTronTxInputData` | TRON blockchain |
 | `ripple` | `getRippleTxInputData` | XRP Ledger |
 
-### 1.3 EVM Transaction Example
+### 4.3 EVM Transaction Example
 
 ```typescript
 // EVM transaction preparation
@@ -79,7 +274,7 @@ const evmTxInput = TW.Ethereum.Proto.SigningInput.create({
 })
 ```
 
-### 1.4 UTXO Transaction Example
+### 4.4 UTXO Transaction Example
 
 ```typescript
 // Bitcoin/UTXO transaction preparation
@@ -105,7 +300,7 @@ const utxoTxInput = TW.Bitcoin.Proto.SigningInput.create({
 })
 ```
 
-### 1.5 Pre-Signing Hash Generation
+### 4.5 Pre-Signing Hash Generation
 
 Once transaction input data is prepared, generate hashes for signing:
 
@@ -121,9 +316,9 @@ const groupedMsgs = inputs.map(txInputData =>
 const msgs = groupedMsgs.flat().sort()
 ```
 
-## 2. MPC Session Initialization
+## 5. MPC Session Initialization
 
-### 2.1 Session Parameters
+### 5.1 Session Parameters
 
 Before starting the MPC ceremony, prepare session parameters:
 
@@ -138,11 +333,11 @@ type SessionParams = {
 }
 ```
 
-### 2.2 Mode Selection
+### 5.2 Mode Selection
 
 The system supports two operational modes:
 
-#### 2.2.1 Relay Mode
+#### 5.2.1 Relay Mode
 Uses Vultisig's hosted relay service for message coordination:
 
 ```typescript
@@ -152,7 +347,7 @@ const relayModeConfig = {
 }
 ```
 
-#### 2.2.2 Local Mode
+#### 5.2.2 Local Mode
 Uses an embedded relay server running on port 18080:
 
 ```typescript
@@ -162,9 +357,9 @@ const localModeConfig = {
 }
 ```
 
-### 2.3 Session Lifecycle
+### 5.3 Session Lifecycle Implementation
 
-#### 2.3.1 Session Registration
+#### 5.3.1 Session Registration
 
 Each participant registers with the session:
 
@@ -172,11 +367,19 @@ Each participant registers with the session:
 // Go implementation
 func (s *Client) RegisterSession(sessionID string, key string) error {
     sessionURL := s.vultisigRelay + "/" + sessionID
-    req, err := http.NewRequest(http.MethodPost, sessionURL, strings.NewReader(key))
+    buf, err := json.Marshal([]string{key})
     if err != nil {
         return fmt.Errorf("fail to register session: %w", err)
     }
-    // ... handle response
+    resp, err := s.client.Post(sessionURL, "application/json", bytes.NewBuffer(buf))
+    if err != nil {
+        return fmt.Errorf("fail to register session: %w", err)
+    }
+    defer s.closer(resp.Body)
+    if resp.StatusCode != http.StatusCreated {
+        return fmt.Errorf("fail to register session: %s", resp.Status)
+    }
+    return nil
 }
 ```
 
@@ -198,7 +401,7 @@ const joinMpcSession = async ({
 }
 ```
 
-#### 2.3.2 Session Start
+#### 5.3.2 Session Start
 
 The initiating device starts the session with participant list:
 
@@ -212,11 +415,19 @@ func (s *Client) StartSession(sessionID string, parties []string) error {
     
     req, err := http.NewRequest(http.MethodPost, sessionURL, bytes.NewBuffer(body))
     req.Header.Set("Content-Type", "application/json")
-    // ... handle response
+    resp, err := s.client.Do(req)
+    if err != nil {
+        return fmt.Errorf("fail to start session: %w", err)
+    }
+    defer s.closer(resp.Body)
+    if resp.StatusCode != http.StatusOK {
+        return fmt.Errorf("fail to start session: %s", resp.Status)
+    }
+    return nil
 }
 ```
 
-#### 2.3.3 Wait for Session Start
+#### 5.3.3 Wait for Session Start
 
 All participants wait for session to begin:
 
@@ -232,9 +443,21 @@ func (s *Client) WaitForSessionStart(ctx context.Context, sessionID string) ([]s
             if err != nil {
                 return nil, fmt.Errorf("fail to get session: %w", err)
             }
+            if resp.StatusCode != http.StatusOK {
+                return nil, fmt.Errorf("fail to get session: %s", resp.Status)
+            }
             
             var parties []string
-            // ... parse response
+            buff, err := io.ReadAll(resp.Body)
+            if err != nil {
+                return nil, fmt.Errorf("fail to read session body: %w", err)
+            }
+            if err := resp.Body.Close(); err != nil {
+                s.Logger.Errorf("fail to close response body, %w", err)
+            }
+            if err := json.Unmarshal(buff, &parties); err != nil {
+                return nil, fmt.Errorf("fail to unmarshal session body: %w", err)
+            }
             
             // Session starts when we have multiple parties
             if len(parties) > 1 {
@@ -247,9 +470,9 @@ func (s *Client) WaitForSessionStart(ctx context.Context, sessionID string) ([]s
 }
 ```
 
-## 3. MPC Keysign Ceremony
+## 6. MPC Keysign Ceremony
 
-### 3.1 Ceremony Initialization
+### 6.1 Ceremony Initialization
 
 Once the session is established, initialize the MPC keysign ceremony:
 
@@ -268,7 +491,7 @@ const keysignResult = await keysign({
 })
 ```
 
-### 3.2 Setup Message Verification
+### 6.2 Setup Message Verification
 
 The system ensures setup message integrity:
 
@@ -292,9 +515,9 @@ if (message !== Buffer.from(setupMessageHash).toString('hex')) {
 }
 ```
 
-### 3.3 MPC Message Exchange
+### 6.3 MPC Message Exchange
 
-#### 3.3.1 Outbound Message Processing
+#### 6.3.1 Outbound Message Processing
 
 ```typescript
 const processOutbound = async (sequenceNo = 0): Promise<void> => {
@@ -329,7 +552,7 @@ const processOutbound = async (sequenceNo = 0): Promise<void> => {
 }
 ```
 
-#### 3.3.2 Inbound Message Processing
+#### 6.3.2 Inbound Message Processing
 
 ```typescript
 const processInbound = async (): Promise<void> => {
@@ -363,7 +586,7 @@ const processInbound = async (): Promise<void> => {
 }
 ```
 
-### 3.4 Go Implementation (Backend)
+### 6.4 Go Implementation (Backend)
 
 The Go backend provides TSS (Threshold Signature Scheme) services:
 
@@ -422,7 +645,7 @@ func (t *TssService) Keysign(
 }
 ```
 
-### 3.5 Signature Generation
+### 6.5 Signature Generation
 
 After successful MPC ceremony, extract the signature:
 
@@ -442,9 +665,9 @@ const [r, s] = [rawR, rawS]
 const derSignature = encodeDERSignature(rawR, rawS)
 ```
 
-## 4. Transaction Compilation
+## 7. Transaction Compilation
 
-### 4.1 Signature Integration
+### 7.1 Signature Integration
 
 Compile the transaction with generated signatures:
 
@@ -460,7 +683,7 @@ const compiledTxs = inputs.map(txInputData =>
 )
 ```
 
-### 4.2 Compilation Process
+### 7.2 Compilation Process
 
 The compilation process involves:
 
@@ -521,7 +744,7 @@ export const compileTx = ({
 }
 ```
 
-### 4.3 Transaction Hash Generation
+### 7.3 Transaction Hash Generation
 
 Generate transaction hash for tracking:
 
@@ -539,9 +762,9 @@ const txs: Tx[] = await Promise.all(
 )
 ```
 
-## 5. Transaction Broadcasting
+## 8. Transaction Broadcasting
 
-### 5.1 Broadcasting Process
+### 8.1 Broadcasting Process
 
 After successful compilation, broadcast transactions to the blockchain:
 
@@ -553,7 +776,7 @@ if (!payload.skipBroadcast) {
 }
 ```
 
-### 5.2 Blockchain-Specific Broadcasting
+### 8.2 Blockchain-Specific Broadcasting
 
 The system supports broadcasting to multiple blockchain types:
 
@@ -575,34 +798,86 @@ export const broadcastTx: BroadcastTxResolver = input =>
   handlers[getChainKind(input.chain)](input)
 ```
 
-### 5.3 Error Handling and Retry Logic
+## 9. Security Implementation
 
-The Go implementation includes retry logic for failed operations:
+### 9.1 Message Encryption
 
+All MPC messages are encrypted using AES encryption:
+
+**TypeScript (AES-GCM):**
+```typescript
+export const toMpcServerMessage = (
+  body: Uint8Array,
+  hexEncryptionKey: string
+) =>
+  encryptWithAesGcm({
+    key: Buffer.from(hexEncryptionKey, 'hex'),
+    value: Buffer.from(base64Encode(body)),
+  }).toString(encryptedEncoding)
+```
+
+**Go (AES-CBC):**
 ```go
-for attempt := 0; attempt < 3; attempt++ {
-    resp, err = tssServerImp.KeysignECDSA(req)
-    if err == nil {
-        // Mark keysign complete
-        if err := client.MarkKeysignComplete(sessionID, messageID, *resp); err != nil {
-            t.Logger.Error("Failed to mark keysign complete")
-        }
-        break
+func encrypt(plainText, hexKey string) (string, error) {
+    key, err := hex.DecodeString(hexKey)
+    if err != nil {
+        return "", err
     }
-    
-    // Check if other party already completed
-    sigResp, checkErr := client.CheckKeysignComplete(sessionID, messageID)
-    if checkErr == nil && sigResp != nil {
-        t.Logger.Info("Other party already got signature")
-        resp = sigResp
-        break
+    plainByte := []byte(plainText)
+    block, err := aes.NewCipher(key)
+    if err != nil {
+        return "", err
     }
+    plainByte = pad(plainByte, aes.BlockSize)
+    iv := make([]byte, aes.BlockSize)
+    if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+        return "", err
+    }
+    mode := cipher.NewCBCEncrypter(block, iv)
+    ciphertext := make([]byte, len(plainByte))
+    mode.CryptBlocks(ciphertext, plainByte)
+    ciphertext = append(iv, ciphertext...)
+    return string(ciphertext), nil
+}
+
+// pad applies PKCS7 padding to the plaintext
+func pad(data []byte, blockSize int) []byte {
+    padding := blockSize - len(data)%blockSize
+    padtext := bytes.Repeat([]byte{byte(padding)}, padding)
+    return append(data, padtext...)
 }
 ```
 
-## 6. Local vs Relay Mode Differences
+### 9.2 Security Features
 
-### 6.1 Local Mode
+**Session Isolation:**
+- Each session has a unique session ID
+- Messages are scoped to specific sessions
+- Encryption keys are session-specific
+- Participants are validated per session
+
+**Message Integrity:**
+- MD5 hashes verify message integrity
+- Sequence numbers prevent replay attacks
+- From/To fields ensure proper routing
+- Session boundaries prevent cross-contamination
+
+**Encryption Standards:**
+
+*Go Side (relay/messenger.go):*
+- Algorithm: AES-CBC
+- Padding: PKCS7
+- Key Format: Hex-encoded
+- IV: Random 16-byte initialization vector
+
+*TypeScript Side (core/mpc/message/server.ts):*
+- Algorithm: AES-GCM
+- Key Format: Hex-encoded
+- Authentication: Built-in AEAD
+
+## 10. Local vs Relay Mode Comparison
+
+### 10.1 Local Mode
 
 **Characteristics:**
 - Uses embedded relay server on port 18080
@@ -625,7 +900,7 @@ const localConfig = {
 - Enhanced privacy
 - Direct device communication
 
-### 6.2 Relay Mode
+### 10.2 Relay Mode
 
 **Characteristics:**
 - Uses Vultisig's hosted relay service
@@ -647,7 +922,7 @@ const relayConfig = {
 - Reliable message delivery
 - Cross-network compatibility
 
-### 6.3 Mode Selection Logic
+### 10.3 Mode Selection Logic
 
 ```typescript
 const selectMode = (preferences: UserPreferences): MpcServerType => {
@@ -658,65 +933,9 @@ const selectMode = (preferences: UserPreferences): MpcServerType => {
 }
 ```
 
-## 7. Security Considerations
+## 11. Error Handling & Recovery
 
-### 7.1 Message Encryption
-
-All MPC messages are encrypted using AES encryption:
-
-**TypeScript (AES-GCM):**
-```typescript
-export const toMpcServerMessage = (body: Uint8Array, hexEncryptionKey: string): string => {
-  const key = Buffer.from(hexEncryptionKey, 'hex')
-  const iv = crypto.getRandomValues(new Uint8Array(12))
-  const cipher = crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv },
-    key,
-    body
-  )
-  return Buffer.concat([iv, cipher]).toString('base64')
-}
-```
-
-**Go (AES-CBC):**
-```go
-func encrypt(data []byte, key []byte) (string, error) {
-    block, err := aes.NewCipher(key)
-    if err != nil {
-        return "", err
-    }
-    
-    data = pkcs7Padding(data, aes.BlockSize)
-    iv := make([]byte, aes.BlockSize)
-    if _, err := rand.Read(iv); err != nil {
-        return "", err
-    }
-    
-    mode := cipher.NewCBCEncrypter(block, iv)
-    encrypted := make([]byte, len(data))
-    mode.CryptBlocks(encrypted, data)
-    
-    return base64.StdEncoding.EncodeToString(append(iv, encrypted...)), nil
-}
-```
-
-### 7.2 Session Isolation
-
-- Each session has a unique session ID
-- Messages are scoped to specific sessions
-- Encryption keys are session-specific
-- Participants are validated per session
-
-### 7.3 Message Integrity
-
-- MD5 hashes verify message integrity
-- Sequence numbers prevent replay attacks
-- From/To fields ensure proper routing
-- Session boundaries prevent cross-contamination
-
-## 8. Error Handling
-
-### 8.1 Common Error Scenarios
+### 11.1 Common Error Scenarios
 
 1. **Network Connectivity Issues**
    - Timeout handling with configurable limits
@@ -738,7 +957,7 @@ func encrypt(data []byte, key []byte) (string, error) {
    - Insufficient fees
    - Network congestion
 
-### 8.2 Error Recovery
+### 11.2 Error Recovery Implementation
 
 ```typescript
 const { error } = await attempt(processInbound())
@@ -755,29 +974,64 @@ if (error) {
 }
 ```
 
-## 9. Performance Considerations
+### 11.3 Retry Logic
 
-### 9.1 Timeouts
+The Go implementation includes retry logic for failed operations:
+
+```go
+for attempt := 0; attempt < 3; attempt++ {
+    if t.isEdDSA(tssType) {
+        resp, err = tssServerImp.KeysignEdDSA(req)
+    } else {
+        resp, err = tssServerImp.KeysignECDSA(req)
+    }
+    if err == nil {
+        // Mark keysign complete
+        if err := client.MarkKeysignComplete(sessionID, messageID, *resp); err != nil {
+            t.Logger.Error("Failed to mark keysign complete")
+        }
+        break
+    }
+    
+    // Check if other party already completed
+    sigResp, checkErr := client.CheckKeysignComplete(sessionID, messageID)
+    if checkErr == nil && sigResp != nil {
+        t.Logger.Info("Other party already got signature")
+        resp = sigResp
+        break
+    }
+}
+```
+
+## 12. Performance Considerations
+
+### 12.1 Timeouts
 
 - **Keysign Timeout**: 1 minute for inbound message processing
 - **Session Start**: 1 minute for session establishment
 - **Keygen Timeout**: 5 minutes for key generation
 
-### 9.2 Message Processing
+### 12.2 Message Processing
 
 - **Batch Processing**: Multiple signatures in single ceremony
 - **Parallel Processing**: Concurrent message handling
 - **Resource Management**: Proper cleanup of completed sessions
 
-### 9.3 Optimization
+### 12.3 Optimization
 
 - **Connection Pooling**: Reuse HTTP connections
 - **Message Batching**: Group related operations
 - **Efficient Encoding**: Use compact message formats
 
-## 10. Integration Examples
+### 12.4 Scalability
 
-### 10.1 Complete Transaction Signing Flow
+- **In-Memory Storage**: Fast but limited by available RAM
+- **Concurrent Sessions**: Multiple MPC sessions supported simultaneously
+- **Message Throughput**: Optimized for small, frequent MPC messages
+
+## 13. Integration Examples
+
+### 13.1 Complete Transaction Signing Flow
 
 ```typescript
 async function signTransaction(
@@ -838,7 +1092,7 @@ async function signTransaction(
 }
 ```
 
-### 10.2 Custom Message Signing
+### 13.2 Custom Message Signing
 
 ```typescript
 async function signCustomMessage(
@@ -876,18 +1130,97 @@ async function signCustomMessage(
 }
 ```
 
-## 11. Conclusion
+## 14. Dependencies & Requirements
 
-This specification provides a comprehensive guide for implementing transaction signing using Vultisig's MPC infrastructure. The system supports both local and relay modes, multiple blockchain types, and provides robust error handling and security features.
+### 14.1 External Libraries
 
-Key takeaways:
+**Go Dependencies:**
+- `github.com/vultisig/vultisig-relay`: Core relay server implementation
+- `github.com/hashicorp/mdns`: mDNS service discovery
+- `github.com/sirupsen/logrus`: Structured logging
+- `github.com/wailsapp/wails/v2`: Desktop application framework
 
-1. **Transaction Preparation**: Use blockchain-specific handlers to prepare transaction input data
-2. **Session Management**: Properly initialize and manage MPC sessions with participant coordination
-3. **MPC Ceremony**: Handle the complex message exchange required for threshold signing
-4. **Mode Selection**: Choose between local and relay modes based on network requirements
-5. **Security**: Implement proper encryption, message integrity, and session isolation
-6. **Error Handling**: Provide comprehensive error handling and recovery mechanisms
-7. **Broadcasting**: Successfully broadcast signed transactions to target blockchains
+**TypeScript Dependencies:**
+- Custom encryption utilities for AES-GCM
+- HTTP client utilities for API communication
+- MPC protocol implementations (DKLS, Schnorr)
 
-The system is designed to be extensible, secure, and efficient, supporting the growing needs of multi-party wallet applications in the blockchain ecosystem.
+### 14.2 System Requirements
+
+- **Port 18080**: Must be available for local relay server
+- **Network Connectivity**: Required for both local and remote modes
+- **mDNS Support**: For automatic service discovery in local mode
+- **Firewall Configuration**: Allow HTTP traffic on port 18080
+
+## 15. Troubleshooting Guide
+
+### 15.1 Common Issues
+
+1. **Port Conflicts**: Ensure port 18080 is available
+2. **Firewall**: Configure firewall to allow mDNS and HTTP traffic
+3. **Network Discovery**: Verify mDNS is working on the network
+4. **Encryption Keys**: Ensure all parties use the same encryption key
+5. **Session Timeouts**: Adjust timeout values for slow networks
+
+### 15.2 Debug Information
+
+- **Logs**: Check application logs for error messages
+- **Network**: Verify network connectivity between parties
+- **Sessions**: Monitor session state transitions
+- **Messages**: Validate message format and encryption
+
+### 15.3 Error Response Codes
+
+- `200 OK`: Successful operation
+- `201 Created`: Session created successfully
+- `202 Accepted`: Message accepted for relay
+- `400 Bad Request`: Invalid request format
+- `404 Not Found`: Session or message not found
+- `500 Internal Server Error`: Server-side error
+
+## 16. Best Practices
+
+### 16.1 Security
+
+1. **Key Management**: Use cryptographically secure random keys
+2. **Session Isolation**: Ensure messages cannot cross session boundaries
+3. **Encryption**: Always encrypt sensitive MPC data
+4. **Integrity**: Verify message hashes before processing
+
+### 16.2 Reliability
+
+1. **Error Handling**: Implement comprehensive error handling
+2. **Timeouts**: Use appropriate timeouts for network operations
+3. **Retry Logic**: Implement exponential backoff for failed requests
+4. **Cleanup**: Ensure proper resource cleanup on errors
+
+### 16.3 Development
+
+1. **Logging**: Use structured logging for debugging
+2. **Testing**: Implement unit and integration tests
+3. **Monitoring**: Add metrics for session success/failure rates
+4. **Documentation**: Keep API documentation up to date
+
+## 17. Conclusion
+
+This comprehensive specification provides a complete guide for implementing transaction signing using Vultisig's MPC infrastructure. The system integrates a sophisticated relay server with a robust transaction signing workflow, supporting both local and remote relay modes, multiple blockchain types, and comprehensive security features.
+
+**Key System Features:**
+
+1. **Dual-Mode Operation**: Seamless switching between local and relay modes
+2. **Multi-Blockchain Support**: Comprehensive support for 10+ blockchain ecosystems
+3. **Secure Communication**: End-to-end encryption with message integrity verification
+4. **Service Discovery**: Automatic network discovery via mDNS
+5. **Robust Error Handling**: Comprehensive error recovery and retry mechanisms
+6. **Scalable Architecture**: Support for concurrent sessions and multiple participants
+
+**Implementation Highlights:**
+
+- **Transaction Preparation**: Blockchain-specific handlers for transaction input data
+- **Session Management**: Complete lifecycle management with participant coordination
+- **MPC Ceremony**: Secure message exchange for threshold signing
+- **Relay Infrastructure**: Embedded HTTP server with in-memory storage
+- **Security**: Multiple encryption layers with session isolation
+- **Broadcasting**: Reliable transaction submission to target blockchains
+
+The system is designed to be extensible, secure, and efficient, supporting the growing needs of multi-party wallet applications in the blockchain ecosystem while maintaining high standards for security, reliability, and performance.

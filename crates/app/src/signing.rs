@@ -111,7 +111,9 @@ impl SigningCoordinator {
         tracing::info!("Created MPC session: {}", session_id);
 
         // Step 3: Perform MPC keysign ceremony
-        let signatures = self.perform_mpc_keysign(&session_params, &pre_signing_hashes).await?;
+        let mut updated_params = session_params.clone();
+        updated_params.session_id = session_id.clone(); // Use MPC session ID for relay operations
+        let signatures = self.perform_mpc_keysign(&updated_params, &pre_signing_hashes).await?;
         tracing::info!("Completed MPC keysign ceremony with {} signatures", signatures.len());
 
         // Step 4: Compile transaction with signatures
@@ -194,7 +196,7 @@ impl SigningCoordinator {
 
     /// Setup relay mode session with remote server
     async fn setup_relay_session(&self, params: &SigningSessionParams, session_id: &str) -> Result<()> {
-        let default_server = "https://api.vultisig.com/router".to_string();
+        let default_server = "https://api.vultisig.com".to_string();
         let server_url = params.relay_server_url.as_ref()
             .unwrap_or(&default_server);
         
@@ -239,7 +241,7 @@ impl SigningCoordinator {
 
     /// Wait for participants to join the session
     async fn wait_for_participants(&self, params: &SigningSessionParams) -> Result<Vec<String>> {
-        let default_relay_server = "https://api.vultisig.com/router".to_string();
+        let default_relay_server = "https://api.vultisig.com".to_string();
         let server_url = match params.signing_mode {
             SigningMode::Relay => {
                 params.relay_server_url.as_ref()
@@ -289,7 +291,7 @@ impl SigningCoordinator {
 
     /// Clean up session resources
     async fn cleanup_session(&self, params: &SigningSessionParams) -> Result<()> {
-        let default_relay_server = "https://api.vultisig.com/router".to_string();
+        let default_relay_server = "https://api.vultisig.com".to_string();
         let server_url = match params.signing_mode {
             SigningMode::Relay => {
                 params.relay_server_url.as_ref()
@@ -375,7 +377,7 @@ impl SigningCoordinator {
         };
 
         // Create relay client for message exchange
-        let default_server = "https://api.vultisig.com/router".to_string();
+        let default_server = "https://api.vultisig.com".to_string();
         let relay_client = if params.signing_mode == SigningMode::Relay {
             let server_url = params.relay_server_url.as_ref()
                 .unwrap_or(&default_server);
@@ -427,7 +429,7 @@ impl SigningCoordinator {
         };
 
         // Create relay client for message exchange
-        let default_server = "https://api.vultisig.com/router".to_string();
+        let default_server = "https://api.vultisig.com".to_string();
         let relay_client = if params.signing_mode == SigningMode::Relay {
             let server_url = params.relay_server_url.as_ref()
                 .unwrap_or(&default_server);
